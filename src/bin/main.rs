@@ -1,10 +1,10 @@
 use std::thread::sleep;
 use std::time::Duration;
 
-use kyoto::io::AsyncReadExt;
-use kyoto::runtime::Runtime;
-use kyoto::task::spawn_blocking;
-use kyoto::net::TcpStream;
+use nara::io::AsyncReadExt;
+use nara::runtime::Runtime;
+use nara::task::spawn_blocking;
+use nara::net::TcpStream;
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let runtime = Runtime::new().unwrap();
