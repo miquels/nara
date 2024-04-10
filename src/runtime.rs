@@ -95,3 +95,9 @@ impl<'a> EnterGuard<'a> {
         }
     }
 }
+
+impl<'a> Drop for EnterGuard<'a> {
+    fn drop(&mut self) {
+        RUNTIME.with_borrow_mut(|rt| *rt = rc::Weak::new());
+    }
+}
