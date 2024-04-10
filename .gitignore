@@ -1,0 +1,17 @@
+/target/
+**/*.rs.bk
+debian/.debhelper
+debian/*-stamp
+debian/*.debhelper
+debian/*.substvars
+debian/*.log
+debian/files
+debian/*/
+!*/debian/source
+Cargo.lock
+foo
+bar
+foobar
+la
+lala
+lalala
