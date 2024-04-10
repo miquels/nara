@@ -72,7 +72,7 @@ impl Runtime {
 }
 
 // Creating an EnterGuard puts a Weak pointer to the inner runtime in
-// the thread-local RUNTINE. As soon as the EnterGuard is dropped the
+// the thread-local RUNTIME. As soon as the EnterGuard is dropped the
 // reference is removed again. So only when holding an EnterGuard, or
 // when calling block_on(), is the runtime context active.
 pub struct EnterGuard<'a> {
@@ -80,6 +80,7 @@ pub struct EnterGuard<'a> {
 }
 
 impl<'a> EnterGuard<'a> {
+    // The EnterGuard has a lifetime that's tied to the Runtime.
     fn new(runtime: &'a Runtime) -> EnterGuard {
         RUNTIME.with_borrow_mut(|rt| {
             if let Some(rt) = rt.upgrade() {

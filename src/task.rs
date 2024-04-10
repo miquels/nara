@@ -4,8 +4,6 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 
-use crate::executor::ErasedFuture;
-
 // Shorthand for Send + 'static
 pub trait Static: Send + 'static {}
 impl<T: Send + 'static> Static for T {}
@@ -39,7 +37,14 @@ where
     }
 }
 
-impl<F, T> ErasedFuture for Task<F, T>
+// Type-erased task so we can store it in a collection.
+pub(crate) trait ErasedTask {
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()>;
+    fn id(&self) -> usize;
+    fn waker(&self) -> &Waker;
+}
+
+impl<F, T> ErasedTask for Task<F, T>
 where
     F: Future<Output = T>,
 {
@@ -61,8 +66,8 @@ where
         self.id
     }
 
-    fn waker(&self) -> Waker {
-        self.waker.clone()
+    fn waker(&self) -> &Waker {
+        &self.waker
     }
 }
 

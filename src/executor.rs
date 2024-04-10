@@ -3,18 +3,11 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::task::{Context, Poll, Waker};
+use std::task::Context;
 
 use crate::reactor::Reactor;
-use crate::task::{JoinHandle, Task};
+use crate::task::{ErasedTask, JoinHandle, Task};
 use crate::time::Timer;
-
-// Type-erased future so we can store it in a collection.
-pub(crate) trait ErasedFuture {
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()>;
-    fn id(&self) -> usize;
-    fn waker(&self) -> Waker;
-} 
 
 pub(crate) struct Executor {
     // Reactor
@@ -26,7 +19,7 @@ pub(crate) struct Executor {
     // receive wakeups here.
     rx: mpsc::Receiver<usize>,
     // store tasks here.
-    tasks: RefCell<HashMap<usize, Box<dyn ErasedFuture>>>,
+    tasks: RefCell<HashMap<usize, Box<dyn ErasedTask>>>,
     // unique id
     next_id: AtomicUsize,
 }
@@ -48,7 +41,7 @@ impl Executor {
     }
 
     pub fn block_on<F: Future<Output=T> + 'static, T: 'static>(&self, fut: F) -> T {
-        // Create new task and put it in the first slot.
+        // Spawn the initial task.
         let handle = self.spawn(fut);
 
         // This is the entire scheduler.
@@ -56,13 +49,17 @@ impl Executor {
 
             // Loop over the wake up messages in the queue.
             while let Ok(task_id) = self.rx.try_recv() {
-                let task = { self.tasks.borrow_mut().remove(&task_id) };
+                let task = self.tasks.borrow_mut().remove(&task_id);
                 if let Some(mut task) = task {
 
                     // create a Context and poll the future.
-                    let waker = task.waker();
+                    //
+                    // storing the waker in the task is nice, but it does mean
+                    // we have to clone the waker because `cx` borrows `task`
+                    // read-only, and `task.poll` borrows it mutably.
+                    let waker = task.waker().clone();
                     let mut cx = Context::from_waker(&waker);
-                    if task.poll(&mut cx) == Poll::Ready(()) {
+                    if task.poll(&mut cx).is_ready() {
                         //
                         // If this was the initial task, return right away.
                         //
@@ -81,6 +78,8 @@ impl Executor {
             // Wait for I/O.
             let timeout = self.timer.next_deadline();
             self.reactor.react(timeout);
+
+            // Run timers.
             self.timer.run();
         }
     }
