@@ -255,16 +255,16 @@ impl InnerReactor {
 }
 
 // A filedescriptor handle with connection to the Reactor.
-pub struct RegisteredFd {
+pub struct Registration {
     fd:         RawFd,
     reactor:    Reactor,
 }
 
-impl RegisteredFd {
-    pub fn new(fd: RawFd) -> RegisteredFd {
-        let reactor = crate::runtime::current().inner.reactor.clone();
+impl Registration {
+    pub fn new(fd: RawFd) -> Registration {
+        let reactor = crate::runtime::with_reactor(|reactor| reactor.clone());
         reactor.register(fd);
-        RegisteredFd {
+        Registration {
             fd,
             reactor,
         }
@@ -276,7 +276,7 @@ impl RegisteredFd {
     }
 }
 
-impl Drop for RegisteredFd {
+impl Drop for Registration {
     fn drop(&mut self) {
         self.reactor.deregister(self.fd);
     }
@@ -286,10 +286,10 @@ impl Drop for RegisteredFd {
 //
 // That struct needs to have at least two members:
 // - $reader: an object that implements std::io::Read, and is set to non-blocking.
-// - $registered_fd: a RegisteredFd struct.
+// - $registration: a Registration struct.
 //
 macro_rules! impl_async_read {
-    ($type: ty, $reader: ident, $registered_fd: ident) => {
+    ($type: ty, $reader: ident, $registration: ident) => {
         impl $crate::io::AsyncRead for $type {
             fn poll_read(
                 mut self: std::pin::Pin<&mut Self>,
@@ -303,7 +303,7 @@ macro_rules! impl_async_read {
                     Err(e) => {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
                             let waker = cx.waker().clone();
-                            this.$registered_fd.wake_when($crate::reactor::Interest::Read, waker);
+                            this.$registration.wake_when($crate::reactor::Interest::Read, waker);
                             std::task::Poll::Pending
                         } else {
                             std::task::Poll::Ready(Err(e))
@@ -331,11 +331,11 @@ pub(crate) use impl_async_write_close;
 //
 // That struct needs to have at least two members:
 // - $writer: an object that implements std::io::Write, and is set to non-blocking.
-// - $registered_fd: a RegisteredFd struct.
+// - $registration: a Registration struct.
 // - optional: $closer - method on $writer to close the writer.
 //
 macro_rules! impl_async_write {
-    ($type: ty, $writer: ident, $registered_fd: ident $($close:tt)*) => {
+    ($type: ty, $writer: ident, $registration: ident $($close:tt)*) => {
 
         impl ::futures_io::AsyncWrite for $type {
             fn poll_write(
@@ -350,7 +350,7 @@ macro_rules! impl_async_write {
                     Err(e) => {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
                             let waker = cx.waker().clone();
-                            this.$registered_fd.wake_when($crate::reactor::Interest::Write, waker);
+                            this.$registration.wake_when($crate::reactor::Interest::Write, waker);
                             std::task::Poll::Pending
                         } else {
                             std::task::Poll::Ready(Err(e))

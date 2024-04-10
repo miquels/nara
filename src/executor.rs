@@ -6,8 +6,8 @@ use std::sync::mpsc;
 use std::task::{Context, Poll, Waker};
 
 use crate::reactor::Reactor;
-use crate::task::JoinHandle;
-use crate::task::Task;
+use crate::task::{JoinHandle, Task};
+use crate::time::Timer;
 
 // Type-erased future so we can store it in a collection.
 pub(crate) trait ErasedFuture {
@@ -17,8 +17,10 @@ pub(crate) trait ErasedFuture {
 } 
 
 pub(crate) struct Executor {
-    // Reactor handle.
-    reactor: Reactor,
+    // Reactor
+    pub reactor: Reactor,
+    // Timer.
+    pub timer: Timer,
     // send wakeups here.
     tx: mpsc::Sender<usize>,
     // receive wakeups here.
@@ -30,11 +32,11 @@ pub(crate) struct Executor {
 }
 
 impl Executor {
-    pub fn new(reactor: Reactor) -> Self {
+    pub fn new(reactor: Reactor, timer: Timer) -> Self {
         let (tx, rx) = mpsc::channel();
         let tasks = RefCell::new(HashMap::new());
         let next_id = AtomicUsize::new(1);
-        Executor { tx, rx, tasks, reactor, next_id }
+        Executor { tx, rx, tasks, reactor, timer, next_id }
     }
 
     pub fn spawn<F: Future<Output=T> + 'static, T: 'static>(&self, fut: F) -> JoinHandle<T> {
@@ -77,7 +79,9 @@ impl Executor {
             }
 
             // Wait for I/O.
-            self.reactor.react(None);
+            let timeout = self.timer.next_deadline();
+            self.reactor.react(timeout);
+            self.timer.run();
         }
     }
 }

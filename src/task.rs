@@ -47,7 +47,6 @@ where
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
 
         // Poll the inner future.
-        let _ = crate::runtime::current();
         match self.future.as_mut().poll(cx) {
             Poll::Ready(res) => {
                 // finished. store result in the JoinHandle.
@@ -133,7 +132,7 @@ impl <T> Future for JoinHandle<T> {
 }
 
 pub fn spawn_blocking<F: FnOnce() -> R + Static, R: Static>(f: F) -> JoinHandle<R> {
-    let rwaker = crate::runtime::current().inner.reactor.waker();
+    let rwaker = crate::runtime::with_reactor(move |reactor| reactor.waker());
     let handle = JoinHandle::new(0);
     let handle2 = handle.clone();
     thread::spawn(move || {
@@ -144,5 +143,5 @@ pub fn spawn_blocking<F: FnOnce() -> R + Static, R: Static>(f: F) -> JoinHandle<
 }
 
 pub fn spawn<F: Future<Output=T> + 'static, T: 'static>(fut: F) -> JoinHandle<T> {
-    crate::runtime::inner().executor.spawn(fut)
+    crate::runtime::with_executor(move |executor| executor.spawn(fut))
 }

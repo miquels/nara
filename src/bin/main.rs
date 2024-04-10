@@ -1,4 +1,3 @@
-use std::thread::sleep;
 use std::time::Duration;
 
 use nara::io::AsyncReadExt;
@@ -11,24 +10,28 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let n = runtime.block_on(async {
 
         let x = spawn_blocking(|| {
-            sleep(Duration::from_millis(1000));
             return "foo";
         }).await;
-        println!("returned: {x:?}");
+        println!("test1: spawn_blocking returned: {x:?}");
 
+        println!("test2: timer 1 sec");
+        nara::time::sleep(Duration::from_millis(1000)).await;
+        println!("test2: timer done");
+
+        println!("test3: tcp connection");
         let mut tcp = TcpStream::connect(("smtp.xs4all.nl", 25)).await?;
-        println!("connected!");
+        println!("test3: connected!");
         let mut buffer: [u8; 256] = [0; 256];
         while let Ok(len) = tcp.read(&mut buffer).await {
             if len == 0 {
                 break;
             }
-            println!("{:?}", std::str::from_utf8(&buffer[..len]));
+            println!("test3: {:?}", std::str::from_utf8(&buffer[..len]));
             break;
         }
         return Ok::<_, std::io::Error>(3u32);
     })?;
-    println!("{n}");
+    println!("test4: spawn_blocking return value {n}");
 
     Ok(())
 }

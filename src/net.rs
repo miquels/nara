@@ -2,12 +2,12 @@ use std::io;
 
 pub use std::net::ToSocketAddrs;
 
-use crate::reactor::{self, RegisteredFd};
+use crate::reactor::{self, Registration};
 
 
 pub struct TcpStream {
     strm:   std::net::TcpStream,
-    regfd:  RegisteredFd,
+    regfd:  Registration,
 }
 
 impl TcpStream {
@@ -17,7 +17,7 @@ impl TcpStream {
         let fd = stream.as_raw_fd();
         Ok(TcpStream {
             strm: stream,
-            regfd: RegisteredFd::new(fd),
+            regfd: Registration::new(fd),
         })
     }
 

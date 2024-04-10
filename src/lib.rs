@@ -6,6 +6,7 @@ pub mod io;
 pub mod net;
 pub mod runtime;
 pub mod task;
+pub mod time;
 
 pub use self::task::spawn;
 
