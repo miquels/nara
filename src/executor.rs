@@ -1,12 +1,10 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::task::Context;
 
 use crate::reactor::Reactor;
-use crate::task::{ErasedTask, JoinHandle, Task};
+use crate::task::{JoinHandle, Task};
 use crate::time::Timer;
 
 pub(crate) struct Executor {
@@ -19,25 +17,30 @@ pub(crate) struct Executor {
     // receive wakeups here.
     rx: mpsc::Receiver<usize>,
     // store tasks here.
-    tasks: RefCell<HashMap<usize, Box<dyn ErasedTask>>>,
+    tasks: RefCell<HashMap<usize, Task>>,
     // unique id
-    next_id: AtomicUsize,
+    next_id: Cell<usize>,
 }
 
 impl Executor {
     pub fn new(reactor: Reactor, timer: Timer) -> Self {
         let (tx, rx) = mpsc::channel();
         let tasks = RefCell::new(HashMap::new());
-        let next_id = AtomicUsize::new(1);
+        let next_id = Cell::new(1);
         Executor { tx, rx, tasks, reactor, timer, next_id }
     }
 
     pub fn spawn<F: Future<Output=T> + 'static, T: 'static>(&self, fut: F) -> JoinHandle<T> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let id = self.next_id.get();
+        self.next_id.set(id + 1);
         let (task, handle) = Task::new(id, self.tx.clone(), fut);
-        self.tasks.borrow_mut().insert(id, Box::new(task));
+        self.tasks.borrow_mut().insert(id, task);
         self.tx.send(id).unwrap();
         handle
+    }
+
+    pub fn queue(&self, task_id: usize) {
+        self.tx.send(task_id).unwrap();
     }
 
     pub fn block_on<F: Future<Output=T> + 'static, T: 'static>(&self, fut: F) -> T {
@@ -57,20 +60,20 @@ impl Executor {
                     // storing the waker in the task is nice, but it does mean
                     // we have to clone the waker because `cx` borrows `task`
                     // read-only, and `task.poll` borrows it mutably.
-                    let waker = task.waker().clone();
-                    let mut cx = Context::from_waker(&waker);
-                    if task.poll(&mut cx).is_ready() {
+                    // let mut cx = Context::from_waker(&task.waker);
+                    // if task.poll(&mut cx).is_ready() {
+                    if task.poll().is_ready() {
                         //
                         // If this was the initial task, return right away.
                         //
-                        if task.id() == handle.id {
+                        if task.id == handle.id {
                             return handle.inner.lock().unwrap().result.take().unwrap();
                         }
                     } else {
                         //
                         // Put the future back.
                         //
-                        self.tasks.borrow_mut().insert(task.id(), task);
+                        self.tasks.borrow_mut().insert(task.id, task);
                     }
                 }
             }
@@ -80,7 +83,7 @@ impl Executor {
             self.reactor.react(timeout);
 
             // Run timers.
-            self.timer.run();
+            self.timer.tick();
         }
     }
 }

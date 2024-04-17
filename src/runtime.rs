@@ -27,25 +27,31 @@ thread_local! {
 }
 
 // helper for the with_ functions below.
-fn inner() -> Rc<InnerRuntime> {
-    RUNTIME.with_borrow(|rt| rt.upgrade()).unwrap()
+fn inner() -> Option<Rc<InnerRuntime>> {
+    RUNTIME.with_borrow(|rt| rt.upgrade())
 }
 
 // Get a temporary reference to the Executor.
 pub(crate) fn with_executor<F: FnOnce(&Executor) -> R, R: 'static>(f: F) -> R {
-    let inner = inner();
+    let inner = inner().unwrap();
     f(&inner.executor)
+}
+
+// Get a temporary reference to the Executor.
+pub(crate) fn try_with_executor<F: FnOnce(Option<&Executor>) -> R, R: 'static>(f: F) -> R {
+    let inner = inner();
+    f(inner.as_ref().map(|i| &i.executor))
 }
 
 // Get a temporary reference to the Timer.
 pub(crate) fn with_timer<F: FnOnce(&Timer) -> R, R: 'static>(f: F) -> R {
-    let inner = inner();
+    let inner = inner().unwrap();
     f(&inner.executor.timer)
 }
 
 // Get a temporary reference to the Reactor.
 pub(crate) fn with_reactor<F: FnOnce(&Reactor) -> R, R: 'static>(f: F) -> R {
-    let inner = inner();
+    let inner = inner().unwrap();
     f(&inner.executor.reactor)
 }
 

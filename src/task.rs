@@ -4,82 +4,72 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 
-// Shorthand for Send + 'static
-pub trait Static: Send + 'static {}
-impl<T: Send + 'static> Static for T {}
+use crate::reactor::ReactorWaker;
 
 // Task.
-pub(crate) struct Task<F, T> {
+pub(crate) struct Task {
     // Unique id
-    id:             usize,
-    // Future to run.
-    future:         Pin<Box<F>>,
+    pub id:         usize,
     // To wake the executor.
-    waker:          Waker,
-    // result when future is done.
-    join_handle:    JoinHandle<T>,
+    pub waker:      Waker,
+    // Future to run.
+    future:         Pin<Box<dyn Future<Output=()>>>,
 }
 
-impl<F, T> Task<F, T>
-where
-    F: Future<Output = T>,
-{
+impl Task {
     // Create a new Task.
-    pub fn new(id: usize, tx: mpsc::Sender<usize>, fut: F) -> (Self, JoinHandle<T>) {
+    pub fn new<F, T>(id: usize, tx: mpsc::Sender<usize>, fut: F) -> (Self, JoinHandle<T>)
+    where
+        F: Future<Output = T> + 'static,
+        T: 'static,
+    {
         let join_handle = JoinHandle::new(id);
+
+        // Wrap the future with a Future<Output=()> so that Task doesn't have to be generic.
+        let join_handle2 = join_handle.clone();
+        let trampoline = async move {
+            let res = fut.await;
+            join_handle2.set_result(res);
+        };
+
+        // Store id, future and waker in the Task struct nice and cosy together.
+        let rwaker = crate::runtime::with_reactor(move |reactor| reactor.waker());
         let task = Task {
             id,
-            future: Box::pin(fut),
-            waker: Arc::new(TaskWaker{ id, tx }).into(),
-            join_handle: join_handle.clone(),
+            future: Box::pin(trampoline),
+            waker: Arc::new(TaskWaker{ id, tx, rwaker }).into(),
         };
+
         (task, join_handle)
     }
-}
 
-// Type-erased task so we can store it in a collection.
-pub(crate) trait ErasedTask {
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()>;
-    fn id(&self) -> usize;
-    fn waker(&self) -> &Waker;
-}
-
-impl<F, T> ErasedTask for Task<F, T>
-where
-    F: Future<Output = T>,
-{
-    // Simplified poll function.
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-
-        // Poll the inner future.
-        match self.future.as_mut().poll(cx) {
-            Poll::Ready(res) => {
-                // finished. store result in the JoinHandle.
-                self.join_handle.set_result(res);
-                Poll::Ready(())
-            },
-            Poll::Pending => Poll::Pending,
-        }
-    }
-
-    fn id(&self) -> usize {
-        self.id
-    }
-
-    fn waker(&self) -> &Waker {
-        &self.waker
+    // Poll the Task.
+    pub fn poll(&mut self) -> Poll<()> {
+        let mut cx = Context::from_waker(&self.waker);
+        self.future.as_mut().poll(&mut cx)
     }
 }
 
-// The task waker just sends the task id to the executor.
+// The task waker makes sure the task gets queued and run by the executor.
 struct TaskWaker {
-    tx:     mpsc::Sender<usize>,
-    id:     usize,
+    id:         usize,
+    // The below for cross-thread waking.
+    tx:         mpsc::Sender<usize>,
+    rwaker:     ReactorWaker,
 }
 
 impl Wake for TaskWaker {
     fn wake(self: Arc<Self>) {
-        self.tx.send(self.id).unwrap();
+        crate::runtime::try_with_executor(move |executor| {
+            if let Some(executor) = executor {
+                // If we're on the same thread as the executor, queue directly.
+                executor.queue(self.id);
+            } else {
+                // We're on another thread, so queue and signal reactor.
+                self.tx.send(self.id).unwrap();
+                self.rwaker.wake();
+            }
+        })
     }
 }
 
@@ -136,14 +126,10 @@ impl <T> Future for JoinHandle<T> {
     }
 }
 
-pub fn spawn_blocking<F: FnOnce() -> R + Static, R: Static>(f: F) -> JoinHandle<R> {
-    let rwaker = crate::runtime::with_reactor(move |reactor| reactor.waker());
+pub fn spawn_blocking<F: FnOnce() -> R + Send + 'static, R: Send + 'static>(f: F) -> JoinHandle<R> {
     let handle = JoinHandle::new(0);
     let handle2 = handle.clone();
-    thread::spawn(move || {
-        handle2.set_result(f());
-        rwaker.wake();
-    });
+    thread::spawn(move || handle2.set_result(f()));
     handle
 }
 
