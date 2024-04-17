@@ -108,6 +108,10 @@ impl<T> JoinHandle<T> {
             waker.wake();
         }
     }
+
+    pub(crate) fn get_result(&self) -> Option<T> {
+        self.inner.lock().unwrap().result.take()
+    }
 }
 
 // A JoinHandle can be awaited.
