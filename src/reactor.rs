@@ -5,12 +5,9 @@
 // This module contains one unsafe block - to call poll(2).
 //
 use std::cell::RefCell;
-use std::fs::File;
-use std::io::Read;
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::RawFd;
 use std::rc::Rc;
 use std::task::Waker;
-use std::thread::{self, ThreadId};
 use std::time::Duration;
 
 use crate::syscall;
@@ -22,8 +19,6 @@ pub struct Reactor {
 
 // Actual reactor.
 pub struct InnerReactor {
-    wake_rx:    File,
-    wake_tx:    File,
     pollfds:    Vec<libc::pollfd>,
     fd_waiters: Vec<FdWaiters>,
 }
@@ -59,39 +54,13 @@ impl FdWaiters {
     }
 }
 
-// A ReactorWaker is used to send 1 byte of data over a filedescriptor
-// that is being watched by the Reactor. This is needed for wakers
-// from other threads, from spawn_blocking() / JoinHandle.
-#[derive(Clone)]
-pub struct ReactorWaker {
-    reactor_thread: ThreadId,
-    wake_tx: RawFd,
-}
-
-impl ReactorWaker {
-    pub fn wake(&self) {
-        if thread::current().id() != self.reactor_thread {
-            let _ = syscall::write(self.wake_tx, &b"a"[..]);
-        }
-    }
-}
-
 impl Reactor {
 
     // Create a new reactor.
     pub fn new() -> Reactor {
-
-        // The first slot is reserved for the wake_rx file descriptor.
-        let (wake_rx, wake_tx) = syscall::pipe().unwrap();
-        let pollfd = libc::pollfd{ fd: wake_rx.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-        let pollfds = vec![pollfd];
-        let fd_waiters = vec![FdWaiters::default()];
-
         let inner = InnerReactor {
-            wake_rx,
-            wake_tx,
-            pollfds,
-            fd_waiters,
+            pollfds: Vec::new(),
+            fd_waiters: Vec::new(),
         };
         Reactor{ inner: Rc::new(RefCell::new(inner)) }
     }
@@ -100,8 +69,14 @@ impl Reactor {
         Reactor { inner: self.inner.clone() }
     }
 
-    // Register a file descriptorr to be monitored.
-    fn register(&self, fd: RawFd) {
+    // Like Registration::new(), but optimized for the case
+    // where you already have a Reactor handle.
+    pub fn registration(&self, fd: RawFd) -> Registration {
+        Registration::new_with_reactor(fd, self)
+    }
+
+    // Register a file descriptor to be monitored.
+    fn register_fd(&self, fd: RawFd) {
         let mut inner = self.inner.borrow_mut();
 
         // See if we can find 'fd' already registered.
@@ -120,7 +95,7 @@ impl Reactor {
     }
 
     // Deregister file descriptor.
-    fn deregister(&self, fd: RawFd) {
+    fn deregister_fd(&self, fd: RawFd) {
         let mut inner = self.inner.borrow_mut();
 
         // Find the matching file descriptor.
@@ -147,14 +122,6 @@ impl Reactor {
         let mut inner = self.inner.borrow_mut();
         inner.react(timeout)
     }
-
-    pub fn waker(&self) -> ReactorWaker {
-        let inner = self.inner.borrow();
-        ReactorWaker {
-            reactor_thread: thread::current().id(),
-            wake_tx: inner.wake_tx.as_raw_fd(),
-        }
-    }
 }
 
 impl InnerReactor {
@@ -173,20 +140,8 @@ impl InnerReactor {
         // Find all waiters with matching interest.
         for i in 0 .. self.pollfds.len() {
 
-            if todo == 0 {
-                break;
-            }
-
             let pollfd = &mut self.pollfds[i];
             if pollfd.revents != 0 {
-                todo -= 1;
-
-                // First fd is just for wakeup.
-                if i == 0 {
-                    pollfd.revents = 0;
-                    self.drain_wake_rx();
-                    continue;
-                }
 
                 // An event happened on this fd.
                 let fd_waiters = &mut self.fd_waiters[i];
@@ -218,6 +173,11 @@ impl InnerReactor {
                     pollfd.fd = -pollfd.fd;
                 }
                 pollfd.revents = 0;
+
+                todo -= 1;
+                if todo == 0 {
+                    break;
+                }
             }
         }
     }
@@ -243,15 +203,6 @@ impl InnerReactor {
                 }
             });
     }
-
-    fn drain_wake_rx(&mut self) {
-        let mut buf: [u8; 256] = [0; 256];
-        while let Ok(n) = self.wake_rx.read(&mut buf) {
-            if n != 256 {
-                break;
-            }
-        }
-    }
 }
 
 // A filedescriptor handle with connection to the Reactor.
@@ -262,11 +213,14 @@ pub struct Registration {
 
 impl Registration {
     pub fn new(fd: RawFd) -> Registration {
-        let reactor = crate::runtime::with_reactor(|reactor| reactor.clone());
-        reactor.register(fd);
+        crate::runtime::with_reactor(|reactor| Registration::new_with_reactor(fd, reactor))
+    }
+
+    fn new_with_reactor(fd: RawFd, reactor: &Reactor) -> Registration {
+        reactor.register_fd(fd);
         Registration {
             fd,
-            reactor,
+            reactor: reactor.clone(),
         }
     }
 
@@ -278,6 +232,6 @@ impl Registration {
 
 impl Drop for Registration {
     fn drop(&mut self) {
-        self.reactor.deregister(self.fd);
+        self.reactor.deregister_fd(self.fd);
     }
 }

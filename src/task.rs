@@ -1,10 +1,11 @@
 use std::future::Future;
+use std::os::fd::RawFd;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 
-use crate::reactor::ReactorWaker;
+use crate::syscall;
 
 // Task.
 pub(crate) struct Task {
@@ -18,7 +19,7 @@ pub(crate) struct Task {
 
 impl Task {
     // Create a new Task.
-    pub fn new<F, T>(id: usize, tx: mpsc::Sender<usize>, fut: F) -> (Self, JoinHandle<T>)
+    pub fn new<F, T>(id: usize, tx: RawFd, fut: F) -> (Self, JoinHandle<T>)
     where
         F: Future<Output = T> + 'static,
         T: 'static,
@@ -33,11 +34,10 @@ impl Task {
         };
 
         // Store id, future and waker in the Task struct nice and cosy together.
-        let rwaker = crate::runtime::with_reactor(move |reactor| reactor.waker());
         let task = Task {
             id,
             future: Box::pin(trampoline),
-            waker: Arc::new(TaskWaker{ id, tx, rwaker }).into(),
+            waker: Arc::new(TaskWaker{ id, tx }).into(),
         };
 
         (task, join_handle)
@@ -54,8 +54,7 @@ impl Task {
 struct TaskWaker {
     id:         usize,
     // The below for cross-thread waking.
-    tx:         mpsc::Sender<usize>,
-    rwaker:     ReactorWaker,
+    tx:         RawFd,
 }
 
 impl Wake for TaskWaker {
@@ -65,9 +64,8 @@ impl Wake for TaskWaker {
                 // If we're on the same thread as the executor, queue directly.
                 executor.queue(self.id);
             } else {
-                // We're on another thread, so queue and signal reactor.
-                self.tx.send(self.id).unwrap();
-                self.rwaker.wake();
+                // We're on another thread, so send task id over pipe.
+                let _ = syscall::write(self.tx, &self.id.to_ne_bytes()[..]);
             }
         })
     }

@@ -1,21 +1,51 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
+use std::fs::File;
 use std::future::Future;
-use std::sync::mpsc;
+use std::io::Read;
+use std::os::fd::AsRawFd;
+use std::sync::Arc;
+use std::task::Wake;
 
-use crate::reactor::Reactor;
+use crate::reactor::{Interest, Reactor, Registration};
+use crate::syscall;
 use crate::task::{JoinHandle, Task};
 use crate::time::Timer;
+
+struct ExecutorWaker;
+
+impl Wake for ExecutorWaker {
+    fn wake(self: Arc<Self>) {
+        crate::runtime::with_executor(move |executor| {
+            let mut buf: [u8; 256] = [0; 256];
+            let mut fh = &executor.wake_pipe_rx;
+            while let Ok(n) = fh.read(&mut buf) {
+                if n % 8 != 0 {
+                    panic!("read a non-multiple-of-8 from the pipe, expected u64");
+                }
+                for b in buf[..n].chunks(8) {
+                    let id = usize::from_ne_bytes(b.try_into().unwrap());
+                    executor.queue(id);
+                }
+            }
+        })
+        // We really should re-use 'self' here as a Waker, but we cannot
+        // call back into the reactor via Registration at this point
+        // because we're being called _from_ the reactor.
+    }
+}
 
 pub(crate) struct Executor {
     // Reactor
     pub reactor: Reactor,
     // Timers.
     pub timer: Timer,
-    // send cross-thread wakeups here.
-    tx: mpsc::Sender<usize>,
-    // receive cross-thread wakeups here.
-    rx: mpsc::Receiver<usize>,
+    // Pipe for cross-thread wakeups.
+    wake_pipe: Registration,
+    // Read wakeup requests from this file
+    wake_pipe_rx: File,
+    // Write wkaeup requests to this file.
+    wake_pipe_tx: File,
     // waiting to run.
     runq: RefCell<VecDeque<Task>>,
     // tasks not currently running.
@@ -30,20 +60,28 @@ pub(crate) struct Executor {
 
 impl Executor {
     pub fn new(reactor: Reactor, timer: Timer) -> Self {
-        let (tx, rx) = mpsc::channel();
-        let runq = RefCell::new(VecDeque::new());
-        let tasks = RefCell::new(HashMap::new());
-        let current_id = Cell::new(0);
-        let current_woken = Cell::new(false);
-        let next_id = Cell::new(1);
-        Executor { tx, rx, tasks, runq, reactor, timer, current_id, current_woken,  next_id }
+        let (rx, tx) = syscall::pipe().unwrap();
+        let wake_pipe = reactor.registration(rx.as_raw_fd());
+        wake_pipe.wake_when(Interest::Read, Arc::new(ExecutorWaker).into());
+        Executor {
+            reactor,
+            timer,
+            wake_pipe,
+            wake_pipe_rx: rx,
+            wake_pipe_tx: tx,
+            runq: RefCell::new(VecDeque::new()),
+            tasks: RefCell::new(HashMap::new()),
+            current_id: Cell::new(0),
+            current_woken: Cell::new(false),
+            next_id: Cell::new(1),
+        }
     }
 
     // Create a new task and put it on the run queue right away.
     pub fn spawn<F: Future<Output=T> + 'static, T: 'static>(&self, fut: F) -> JoinHandle<T> {
         let id = self.next_id.get();
         self.next_id.set(id + 1);
-        let (task, handle) = Task::new(id, self.tx.clone(), fut);
+        let (task, handle) = Task::new(id, self.wake_pipe_tx.as_raw_fd(), fut);
         self.runq.borrow_mut().push_back(task);
         handle
     }
@@ -67,11 +105,6 @@ impl Executor {
 
         // This is the entire scheduler.
         loop {
-
-            // First empty the channel.
-            while let Ok(task_id) = self.rx.try_recv() {
-                self.queue(task_id);
-            }
 
             // Loop over the wake up messages in the queue.
             while let Some(mut task) = self.runq.borrow_mut().pop_back() {
@@ -99,6 +132,8 @@ impl Executor {
                 }
             }
             self.current_id.set(0);
+            // This is suboptimal, see comment in impl Waker for ExecutorWaker.
+            self.wake_pipe.wake_when(Interest::Read, Arc::new(ExecutorWaker).into());
 
             // Wait for I/O.
             let timeout = self.timer.next_deadline();
