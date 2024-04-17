@@ -10,7 +10,7 @@ use crate::syscall;
 // Task.
 pub(crate) struct Task {
     // Unique id
-    pub id:         usize,
+    pub id:         u64,
     // To wake the executor.
     pub waker:      Waker,
     // Future to run.
@@ -19,7 +19,7 @@ pub(crate) struct Task {
 
 impl Task {
     // Create a new Task.
-    pub fn new<F, T>(id: usize, tx: RawFd, fut: F) -> (Self, JoinHandle<T>)
+    pub fn new<F, T>(id: u64, tx: RawFd, fut: F) -> (Self, JoinHandle<T>)
     where
         F: Future<Output = T> + 'static,
         T: 'static,
@@ -52,7 +52,7 @@ impl Task {
 
 // The task waker makes sure the task gets queued and run by the executor.
 struct TaskWaker {
-    id:         usize,
+    id:         u64,
     // The below for cross-thread waking.
     tx:         RawFd,
 }
@@ -77,7 +77,7 @@ pub struct JoinError;
 // spawn() and spawn_blocking return a JoinHandle, which can be awaited on,
 // and which will return the return value of the spawned task.
 pub struct JoinHandle<T> {
-    pub(crate) id: usize,
+    pub(crate) id: u64,
     pub(crate) inner: Arc<Mutex<JoinInner<T>>>,
 }
 
@@ -88,7 +88,7 @@ pub(crate) struct JoinInner<T> {
 
 impl<T> JoinHandle<T> {
     // Create new, empty JoinHandle.
-    fn new(id: usize) -> JoinHandle<T> {
+    fn new(id: u64) -> JoinHandle<T> {
         let inner = JoinInner { result: None, waker: None };
         JoinHandle { id, inner: Arc::new(Mutex::new(inner)) }
     }

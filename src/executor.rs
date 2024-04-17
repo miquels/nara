@@ -24,7 +24,7 @@ impl Wake for ExecutorWaker {
                     panic!("read a non-multiple-of-8 from the pipe, expected u64");
                 }
                 for b in buf[..n].chunks(8) {
-                    let id = usize::from_ne_bytes(b.try_into().unwrap());
+                    let id = u64::from_ne_bytes(b.try_into().unwrap());
                     executor.queue(id);
                 }
             }
@@ -49,13 +49,13 @@ pub(crate) struct Executor {
     // waiting to run.
     runq: RefCell<VecDeque<Task>>,
     // tasks not currently running.
-    tasks: RefCell<HashMap<usize, Task>>,
+    tasks: RefCell<HashMap<u64, Task>>,
     // current task.
-    current_id: Cell<usize>,
+    current_id: Cell<u64>,
     // current task woken?
     current_woken: Cell<bool>,
     // next unique id
-    next_id: Cell<usize>,
+    next_id: Cell<u64>,
 }
 
 impl Executor {
@@ -87,7 +87,7 @@ impl Executor {
     }
 
     // Queue a task onto the run queue.
-    pub fn queue(&self, task_id: usize) {
+    pub fn queue(&self, task_id: u64) {
         // If we're already the active task, just take a note.
         if self.current_id.get() == task_id {
             self.current_woken.set(true);

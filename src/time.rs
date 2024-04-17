@@ -8,7 +8,7 @@ use std::cell::{Cell, RefCell};
 
 pub(crate) struct Timer {
     timers: RefCell<BTreeMap::<Sleep, Option<Waker>>>,
-    next_id: Cell<usize>,
+    next_id: Cell<u64>,
 }
 
 impl Timer {
@@ -46,7 +46,7 @@ impl Timer {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct Sleep {
     deadline:   Instant,
-    id:         usize,
+    id:         u64,
 }
 
 impl Sleep {
