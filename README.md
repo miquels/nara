@@ -17,6 +17,6 @@ Current status:
 There are 5 'unsafe' blocks, all in src/syscall.rs, implementing
 the poll(2), pipe(2) and write(2) system calls.
 
-Nara Lines of code:  712
+Nara Lines of code:  738  
 Tokio lines of code: 82513
 
