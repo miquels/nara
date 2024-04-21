@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::fs::File;
 use std::io::Read;
 use std::os::fd::{AsRawFd, RawFd};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::task::Waker;
 use std::thread::{self, ThreadId};
 use std::time::Duration;
@@ -26,6 +26,11 @@ pub struct InnerReactor {
     wake_tx:    File,
     pollfds:    Vec<libc::pollfd>,
     fd_waiters: Vec<FdWaiters>,
+}
+
+thread_local! {
+    // Valid after Reactor::activate(), invalid after Reactor::deactivate()
+    static REACTOR: RefCell<Weak<RefCell<InnerReactor>>> = RefCell::new(Weak::new());
 }
 
 // Interest.
@@ -96,8 +101,14 @@ impl Reactor {
         Reactor{ inner: Rc::new(RefCell::new(inner)) }
     }
 
-    pub fn clone(&self) -> Reactor {
-        Reactor { inner: self.inner.clone() }
+    // Activate the thread-local reference.
+    pub fn activate(&self) {
+        REACTOR.with_borrow_mut(|t| *t = Rc::downgrade(&self.inner));
+    }
+
+    // De-activate (and free) the thread-local reference.
+    pub fn deactivate(&self) {
+        REACTOR.with_borrow_mut(|t| *t = Weak::new());
     }
 
     // Register a file descriptorr to be monitored.
@@ -262,7 +273,8 @@ pub struct Registration {
 
 impl Registration {
     pub fn new(fd: RawFd) -> Registration {
-        let reactor = crate::runtime::with_reactor(|reactor| reactor.clone());
+        let inner = REACTOR.with_borrow(|r| r.upgrade().unwrap());
+        let reactor = Reactor { inner };
         reactor.register(fd);
         Registration {
             fd,

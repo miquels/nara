@@ -43,18 +43,6 @@ pub(crate) fn try_with_executor<F: FnOnce(Option<&Executor>) -> R, R: 'static>(f
     f(inner.as_ref().map(|i| &i.executor))
 }
 
-// Get a temporary reference to the Timer.
-pub(crate) fn with_timer<F: FnOnce(&Timer) -> R, R: 'static>(f: F) -> R {
-    let inner = inner().unwrap();
-    f(&inner.executor.timer)
-}
-
-// Get a temporary reference to the Reactor.
-pub(crate) fn with_reactor<F: FnOnce(&Reactor) -> R, R: 'static>(f: F) -> R {
-    let inner = inner().unwrap();
-    f(&inner.executor.reactor)
-}
-
 impl Runtime {
     // Create a new Runtime.
     pub fn new() -> io::Result<Runtime> {
@@ -97,6 +85,8 @@ impl<'a> EnterGuard<'a> {
                 *rt = Rc::downgrade(&runtime.inner);
             }
         });
+        runtime.inner.executor.reactor.activate();
+        runtime.inner.executor.timer.activate();
         EnterGuard {
             lifetime: std::marker::PhantomData,
         }
@@ -105,6 +95,11 @@ impl<'a> EnterGuard<'a> {
 
 impl<'a> Drop for EnterGuard<'a> {
     fn drop(&mut self) {
-        RUNTIME.with_borrow_mut(|rt| *rt = rc::Weak::new());
+        RUNTIME.with_borrow_mut(|rt| {
+            let runtime = rt.upgrade().unwrap();
+            runtime.executor.reactor.deactivate();
+            runtime.executor.timer.deactivate();
+            *rt = rc::Weak::new();
+        });
     }
 }
