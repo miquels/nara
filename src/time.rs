@@ -13,7 +13,7 @@ pub(crate) struct Timer {
 
 pub(crate) struct InnerTimer {
     timers: RefCell<BTreeMap::<Sleep, Option<Waker>>>,
-    next_id: Cell<usize>,
+    next_id: Cell<u64>,
 }
 
 thread_local! {
@@ -67,7 +67,7 @@ impl Timer {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct Sleep {
     deadline:   Instant,
-    id:         usize,
+    id:         u64,
 }
 
 impl Sleep {

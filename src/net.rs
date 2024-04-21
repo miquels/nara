@@ -1,10 +1,10 @@
 use std::io;
+use crate::reactor::Registration;
 
+// Re-exports.
 pub use std::net::ToSocketAddrs;
 
-use crate::reactor::{self, Registration};
-
-
+/// A TCP stream.
 pub struct TcpStream {
     strm:   std::net::TcpStream,
     regfd:  Registration,
@@ -27,8 +27,11 @@ impl TcpStream {
         }).await.unwrap()?;
         Self::from_std(stream)
     }
+
+    pub fn shutdown(&self) -> io::Result<()> {
+        self.strm.shutdown(std::net::Shutdown::Write)
+    }
 }
 
-reactor::impl_async_read!(TcpStream, strm, regfd);
-reactor::impl_async_write!(TcpStream, strm, regfd, shutdown(std::net::Shutdown::Write));
-
+crate::io::impl_async_read!(TcpStream, strm, regfd);
+crate::io::impl_async_write!(TcpStream, strm, regfd, shutdown);
