@@ -26,25 +26,8 @@ thread_local! {
     pub(crate) static RUNTIME: RefCell<rc::Weak<InnerRuntime>> = RefCell::new(rc::Weak::new());
 }
 
-// helper for the with_ functions below.
-fn inner() -> Option<Rc<InnerRuntime>> {
-    RUNTIME.with_borrow(|rt| rt.upgrade())
-}
-
-// Get a temporary reference to the Executor.
-pub(crate) fn with_executor<F: FnOnce(&Executor) -> R, R: 'static>(f: F) -> R {
-    let inner = inner().unwrap();
-    f(&inner.executor)
-}
-
-// Get a temporary reference to the Executor.
-pub(crate) fn try_with_executor<F: FnOnce(Option<&Executor>) -> R, R: 'static>(f: F) -> R {
-    let inner = inner();
-    f(inner.as_ref().map(|i| &i.executor))
-}
-
 impl Runtime {
-    // Create a new Runtime.
+    /// Create a new nara Runtime.
     pub fn new() -> io::Result<Runtime> {
         let reactor = Reactor::new();
         let timer = Timer::new();
@@ -53,15 +36,20 @@ impl Runtime {
         Ok(Runtime { inner })
     }
 
-    // Activate runtime context.
-    pub fn enter(&self) -> EnterGuard {
-        EnterGuard::new(self)
-    }
-
-    // Run a future on the executor. Runtime gets activated.
+    /// Run a future on the executor.
     pub fn block_on<F: Future<Output=T> + 'static, T: 'static>(&self, fut: F) -> T {
         let _guard = self.enter();
         self.inner.executor.block_on(fut)
+    }
+
+    /// Activate the runtime context. Returns an `EnterGuard`.
+    ///
+    /// This is only needed to initialize objects like `TcpSocket`s that need an
+    /// active runtime context while you're not within `Runtime::block_on`.
+    /// This context is deactivated once the `EnterGuard is dropped, or after
+    /// `Runtime::block_on` exits.
+    pub fn enter(&self) -> EnterGuard {
+        EnterGuard::new(self)
     }
 }
 
@@ -85,20 +73,19 @@ impl<'a> EnterGuard<'a> {
                 *rt = Rc::downgrade(&runtime.inner);
             }
         });
-        runtime.inner.executor.reactor.activate();
-        runtime.inner.executor.timer.activate();
+        runtime.inner.executor.activate();
         EnterGuard {
             lifetime: std::marker::PhantomData,
         }
     }
 }
 
+// This makes sure all resources get released.
 impl<'a> Drop for EnterGuard<'a> {
     fn drop(&mut self) {
         RUNTIME.with_borrow_mut(|rt| {
             let runtime = rt.upgrade().unwrap();
-            runtime.executor.reactor.deactivate();
-            runtime.executor.timer.deactivate();
+            runtime.executor.deactivate();
             *rt = rc::Weak::new();
         });
     }

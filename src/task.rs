@@ -59,8 +59,8 @@ struct TaskWaker {
 
 impl Wake for TaskWaker {
     fn wake(self: Arc<Self>) {
-        crate::runtime::try_with_executor(move |executor| {
-            if let Some(executor) = executor {
+        crate::executor::EXECUTOR.with_borrow(|e| {
+            if let Some(executor) = e.upgrade() {
                 // If we're on the same thread as the executor, queue directly.
                 executor.queue(self.id);
             } else {
@@ -136,5 +136,8 @@ pub fn spawn_blocking<F: FnOnce() -> R + Send + 'static, R: Send + 'static>(f: F
 }
 
 pub fn spawn<F: Future<Output=T> + 'static, T: 'static>(fut: F) -> JoinHandle<T> {
-    crate::runtime::with_executor(move |executor| executor.spawn(fut))
+    crate::executor::EXECUTOR.with_borrow(|e| {
+        let executor = e.upgrade().unwrap();
+        executor.spawn(fut)
+    })
 }
