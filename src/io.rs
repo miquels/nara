@@ -22,6 +22,9 @@ macro_rules! impl_async_read {
             ) -> std::task::Poll<std::io::Result<usize>> {
                 use std::io::Read;
                 let mut this = self.as_mut();
+                if !this.$registration.was_woken() {
+                    return std::task::Poll::Pending;
+                }
                 match this.$reader.read(buf) {
                     Ok(n) => std::task::Poll::Ready(Ok(n)),
                     Err(e) => {
@@ -72,6 +75,9 @@ macro_rules! impl_async_write {
             ) -> std::task::Poll<std::io::Result<usize>> {
                 use std::io::Write;
                 let mut this = self.as_mut();
+                if !this.$registration.was_woken() {
+                    return std::task::Poll::Pending;
+                }
                 match this.$writer.write(buf) {
                     Ok(n) => std::task::Poll::Ready(Ok(n)),
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {

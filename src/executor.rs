@@ -18,10 +18,6 @@ pub (crate) struct Executor {
 }
 
 pub(crate) struct InnerExecutor {
-    // Reactor
-    pub reactor: Reactor,
-    // Timers.
-    pub timer: Timer,
     // Pipe for cross-thread wakeups.
     wake_pipe: Registration,
     // Read wakeup requests from this file
@@ -38,6 +34,10 @@ pub(crate) struct InnerExecutor {
     current_woken: Cell<bool>,
     // next unique id
     next_id: Cell<u64>,
+    // Timers
+    pub timer: Timer,
+    // Reactor (last because needs to be dropped last)
+    pub reactor: Reactor,
 }
 
 thread_local! {
