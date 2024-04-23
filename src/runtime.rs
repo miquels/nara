@@ -10,20 +10,12 @@ use crate::time::Timer;
 
 /// Nara Runtime.
 pub struct Runtime {
-    // We have 2 references to a inner runtime, the one in the Runtime
-    // struct we return from Runtime::new(), and the one we keep in a
-    // thread local variable, so we need an Rc.
-    pub(crate) inner: Rc<InnerRuntime>,
-}
-
-// Inner runtime only holds the executor.
-pub(crate) struct InnerRuntime {
-    executor: Executor,
+    pub(crate) executor: Rc<Executor>,
 }
 
 // thread local reference to the inner runtime.
 thread_local! {
-    pub(crate) static RUNTIME: RefCell<rc::Weak<InnerRuntime>> = RefCell::new(rc::Weak::new());
+    pub(crate) static EXECUTOR: RefCell<rc::Weak<Executor>> = RefCell::new(rc::Weak::new());
 }
 
 impl Runtime {
@@ -31,15 +23,14 @@ impl Runtime {
     pub fn new() -> io::Result<Runtime> {
         let reactor = Reactor::new();
         let timer = Timer::new();
-        let executor = Executor::new(reactor, timer);
-        let inner = Rc::new(InnerRuntime { executor });
-        Ok(Runtime { inner })
+        let executor = Rc::new(Executor::new(reactor, timer));
+        Ok(Runtime { executor })
     }
 
     /// Run a future on the executor.
     pub fn block_on<F: Future<Output=T> + 'static, T: 'static>(&self, fut: F) -> T {
         let _guard = self.enter();
-        self.inner.executor.block_on(fut)
+        self.executor.block_on(fut)
     }
 
     /// Activate the runtime context. Returns an `EnterGuard`.
@@ -53,8 +44,8 @@ impl Runtime {
     }
 }
 
-// Creating an EnterGuard puts a Weak pointer to the inner runtime in
-// the thread-local RUNTIME. As soon as the EnterGuard is dropped the
+// Creating an EnterGuard puts a Weak pointer to the inner executor in
+// the thread-local EXECUTOR. As soon as the EnterGuard is dropped the
 // reference is removed again. So only when holding an EnterGuard, or
 // when calling block_on(), is the runtime context active.
 pub struct EnterGuard<'a> {
@@ -64,16 +55,16 @@ pub struct EnterGuard<'a> {
 impl<'a> EnterGuard<'a> {
     // The EnterGuard has a lifetime that's tied to the Runtime.
     fn new(runtime: &'a Runtime) -> EnterGuard {
-        RUNTIME.with_borrow_mut(|rt| {
+        EXECUTOR.with_borrow_mut(|rt| {
             if let Some(rt) = rt.upgrade() {
-                if !Rc::ptr_eq(&runtime.inner, &rt) {
+                if !Rc::ptr_eq(&runtime.executor, &rt) {
                     panic!("already in a runtime context!");
                 }
             } else {
-                *rt = Rc::downgrade(&runtime.inner);
+                *rt = Rc::downgrade(&runtime.executor);
             }
         });
-        runtime.inner.executor.activate();
+        runtime.executor.activate();
         EnterGuard {
             lifetime: std::marker::PhantomData,
         }
@@ -83,9 +74,8 @@ impl<'a> EnterGuard<'a> {
 // This makes sure all resources get released.
 impl<'a> Drop for EnterGuard<'a> {
     fn drop(&mut self) {
-        RUNTIME.with_borrow_mut(|rt| {
-            let runtime = rt.upgrade().unwrap();
-            runtime.executor.deactivate();
+        EXECUTOR.with_borrow_mut(|rt| {
+            rt.upgrade().map(|rt| rt.deactivate());
             *rt = rc::Weak::new();
         });
     }

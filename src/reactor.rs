@@ -1,8 +1,6 @@
+//
 // A simple reactor that uses poll(2) to react to I/O events.
-//
 // Why poll(2)? Because it's ubiquitous, works on any unix variant.
-//
-// This module contains one unsafe block - to call poll(2).
 //
 use std::cell::{Cell, RefCell};
 use std::os::fd::RawFd;
