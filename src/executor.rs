@@ -49,7 +49,6 @@ impl Executor {
     pub fn new(reactor: Reactor, timer: Timer) -> Self {
         let (rx, tx) = syscall::pipe().unwrap();
         let wake_pipe = reactor.registration(rx.as_raw_fd());
-        wake_pipe.wake_when(Interest::Read, Arc::new(ExecutorWaker).into());
         let inner = Rc::new(InnerExecutor {
             reactor,
             timer,
@@ -114,8 +113,11 @@ impl Executor {
                 }
             }
             this.current_id.set(0);
+
             // This is suboptimal, see comment in impl Waker for ExecutorWaker.
-            this.wake_pipe.wake_when(Interest::Read, Arc::new(ExecutorWaker).into());
+            if this.wake_pipe.was_woken() {
+                this.wake_pipe.wake_when(Interest::Read, Arc::new(ExecutorWaker).into());
+            }
 
             // Wait for I/O.
             let timeout = this.timer.next_deadline();
@@ -167,6 +169,9 @@ impl Wake for ExecutorWaker {
                 for b in buf[..n].chunks(8) {
                     let id = u64::from_ne_bytes(b.try_into().unwrap());
                     executor.queue(id);
+                }
+                if n < buf.len() {
+                    break;
                 }
             }
         })

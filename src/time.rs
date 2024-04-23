@@ -103,14 +103,17 @@ impl Future for Sleep {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // check for initial poll, or spurious wakeup.
-        if !self.is_elapsed() {
-            TIMER.with_borrow(|t| {
-                let timer = t.upgrade().unwrap();
-                timer.timers.borrow_mut().insert(self.clone(), Some(cx.waker().clone()));
-            });
-            return Poll::Pending;
+        let timer = TIMER.with_borrow(|t| t.upgrade().unwrap());
+        let mut timers = timer.timers.borrow_mut();
+        // Note, if there is an entry in `timers`, it means that this was
+        // a spurious wakeup, not caused by Timer::tick().
+        match timers.get_mut(self.get_mut()) {
+            None => Poll::Ready(()),
+            Some(e) => {
+                // Only update the entry if it was not set yet.
+                e.get_or_insert_with(|| cx.waker().clone());
+                Poll::Pending
+            },
         }
-        Poll::Ready(())
     }
 }

@@ -263,7 +263,6 @@ impl Registration {
 
 impl Drop for Registration {
     fn drop(&mut self) {
-        let inner = self.reactor.upgrade().unwrap();
-        inner.borrow_mut().deregister_fd(&self);
+        self.reactor.upgrade().map(|r| r.borrow_mut().deregister_fd(&self));
     }
 }

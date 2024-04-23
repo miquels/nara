@@ -1,3 +1,4 @@
+use std::thread::sleep;
 use std::time::Duration;
 
 use nara::io::AsyncReadExt;
@@ -10,6 +11,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let n = runtime.block_on(async {
 
         let x = spawn_blocking(|| {
+            sleep(Duration::from_millis(10));
             return "foo";
         }).await;
         println!("test1: spawn_blocking returned: {x:?}");
