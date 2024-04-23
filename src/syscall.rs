@@ -31,6 +31,8 @@ fn non_blocking(fd: RawFd) {
     }
 }
 
+// Note that we change this pipe to non-blocking on the read side,
+// but leave it as _blocking_ on the write side!
 pub fn pipe() -> io::Result<(File, File)> {
     let mut fds: [libc::c_int; 2] = [0; 2];
     // SAFETY: very basic linux system call.
@@ -38,7 +40,6 @@ pub fn pipe() -> io::Result<(File, File)> {
         libc::pipe(fds.as_mut_ptr())
     };
     non_blocking(fds[0]);
-    non_blocking(fds[1]);
     // SAFETY: constructing a File from fd we just opened.
     let files = unsafe {
         (File::from_raw_fd(fds[0]), File::from_raw_fd(fds[1]))

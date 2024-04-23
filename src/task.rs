@@ -34,6 +34,7 @@ impl Task {
         };
 
         // Store id, future and waker in the Task struct nice and cosy together.
+        // Note that in the current implementation, `tx` is in blocking mode!
         let task = Task {
             id,
             future: Box::pin(trampoline),
@@ -65,6 +66,7 @@ impl Wake for TaskWaker {
                 executor.queue(self.id);
             } else {
                 // We're on another thread, so send task id over pipe.
+                // Note that self.tx is a _blocking_ file descriptor.
                 let _ = syscall::write(self.tx, &self.id.to_ne_bytes()[..]);
             }
         })
