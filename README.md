@@ -27,4 +27,4 @@ cargo run --example naratest
 Lines of code, counted by `cloc src`
 
 Tokio: 82513  
-Nara:  777
+Nara:  785
