@@ -3,7 +3,6 @@ use std::os::fd::RawFd;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Wake, Waker};
-use std::thread;
 
 use crate::syscall;
 
@@ -90,18 +89,18 @@ pub(crate) struct JoinInner<T> {
 
 impl<T> JoinHandle<T> {
     // Create new, empty JoinHandle.
-    fn new(id: u64) -> JoinHandle<T> {
+    pub(crate) fn new(id: u64) -> JoinHandle<T> {
         let inner = JoinInner { result: None, waker: None };
         JoinHandle { id, inner: Arc::new(Mutex::new(inner)) }
     }
 
     // non-public clone().
-    fn clone(&self) -> JoinHandle<T> {
+    pub(crate) fn clone(&self) -> JoinHandle<T> {
         JoinHandle { id: self.id, inner: self.inner.clone() }
     }
 
     // store the result and wake the task that is waiting on this handle.
-    fn set_result(&self, res: T) {
+    pub(crate) fn set_result(&self, res: T) {
         let mut inner = self.inner.lock().unwrap();
         inner.result = Some(res);
         if let Some(waker) = inner.waker.take() {
@@ -131,10 +130,10 @@ impl <T> Future for JoinHandle<T> {
 }
 
 pub fn spawn_blocking<F: FnOnce() -> R + Send + 'static, R: Send + 'static>(f: F) -> JoinHandle<R> {
-    let handle = JoinHandle::new(0);
-    let handle2 = handle.clone();
-    thread::spawn(move || handle2.set_result(f()));
-    handle
+    crate::executor::EXECUTOR.with_borrow(move |e| {
+        let executor = e.upgrade().unwrap();
+        executor.pool.spawn(f)
+    })
 }
 
 pub fn spawn<F: Future<Output=T> + 'static, T: 'static>(fut: F) -> JoinHandle<T> {

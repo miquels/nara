@@ -10,11 +10,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let runtime = Runtime::new().unwrap();
     let n = runtime.block_on(async {
 
-        let x = spawn_blocking(|| {
-            sleep(Duration::from_millis(10));
-            return "foo";
-        }).await;
-        println!("test1: spawn_blocking returned: {x:?}");
+        let b1 = bl_spawn(1);
+        let b2 = bl_spawn(2);
+        let b3 = bl_spawn(3);
+        let b4 = bl_spawn(4);
+        println!("test1: spawn_blocking x 4 returned: {:?}", futures::join!(b1, b2, b3, b4));
 
         println!("test2: timer 1 sec");
         nara::time::sleep(Duration::from_millis(1000)).await;
@@ -38,4 +38,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-
+async fn bl_spawn(id: u64) -> String {
+    spawn_blocking(move || {
+        sleep(Duration::from_millis(250));
+        format!("foo {}", id)
+    }).await.unwrap()
+}

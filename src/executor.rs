@@ -11,6 +11,7 @@ use std::task::Wake;
 use crate::reactor::{Interest, Reactor, Registration};
 use crate::syscall;
 use crate::task::{JoinHandle, Task};
+use crate::threadpool::ThreadPool;
 use crate::time::Timer;
 
 pub (crate) struct Executor {
@@ -34,6 +35,8 @@ pub(crate) struct InnerExecutor {
     current_woken: Cell<bool>,
     // next unique id
     next_id: Cell<u64>,
+    // Threadpool for spawn_nonblocking
+    pub pool: ThreadPool,
     // Timers
     pub timer: Timer,
     // Reactor (last because needs to be dropped last)
@@ -50,8 +53,6 @@ impl Executor {
         let (rx, tx) = syscall::pipe().unwrap();
         let wake_pipe = reactor.registration(rx.as_raw_fd());
         let inner = Rc::new(InnerExecutor {
-            reactor,
-            timer,
             wake_pipe,
             wake_pipe_rx: rx,
             wake_pipe_tx: tx,
@@ -60,6 +61,9 @@ impl Executor {
             current_id: Cell::new(0),
             current_woken: Cell::new(false),
             next_id: Cell::new(1),
+            pool: ThreadPool::new(),
+            reactor,
+            timer,
         });
         Executor { inner }
     }

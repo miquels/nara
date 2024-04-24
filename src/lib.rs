@@ -1,6 +1,7 @@
 pub(crate) mod executor;
 pub(crate) mod reactor;
 pub(crate) mod syscall;
+pub(crate) mod threadpool;
 
 pub mod io;
 pub mod net;
