@@ -9,7 +9,7 @@ for the read/write traits). Can run Send and non-Send futures.
 
 - tested on linux, macos and freebsd
 - executor: `block_on`.
-- task: `spawn`, `spawn_blocking`, `JoinHandle`
+- task: `spawn`, `spawn_blocking` (threadpool), `JoinHandle`
 - reactor: `AsyncRead` / `AsyncWrite`, etc
 - timer: `sleep`, `sleep_until`.
 - net: `TcpStream`
@@ -24,5 +24,7 @@ cargo run --example naratest
 ```
 
 ## Size
-Nara Lines of code:  757  
-Tokio lines of code: 82513
+Lines of code, counted by `cloc src`
+
+Tokio: 82513  
+Nara:  777
