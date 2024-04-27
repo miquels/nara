@@ -9,5 +9,9 @@ pub mod runtime;
 pub mod task;
 pub mod time;
 
-pub use self::task::spawn;
+#[path="."]
+pub mod sync {
+    pub mod mpsc;
+}
 
+pub use self::task::spawn;

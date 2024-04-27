@@ -82,6 +82,10 @@ impl Executor {
         self.inner.timer.deactivate();
     }
 
+    fn pop_task(&self) -> Option<Task> {
+        self.inner.runq.borrow_mut().pop_back()
+    }
+
     pub fn block_on<F: Future<Output=T> + 'static, T: 'static>(&self, fut: F) -> T {
         let this = &self.inner;
 
@@ -92,7 +96,7 @@ impl Executor {
         loop {
 
             // Loop over the wake up messages in the queue.
-            while let Some(mut task) = this.runq.borrow_mut().pop_back() {
+            while let Some(mut task) = self.pop_task() {
 
                 this.current_id.set(task.id);
                 this.current_woken.set(false);
