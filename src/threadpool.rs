@@ -44,12 +44,12 @@ impl ThreadPool {
         // Now move the closure to the ThreadPool executor.
         let handle = JoinHandle::new(0);
         let handle2 = handle.clone();
-        let trunk = move || {
+        let thunk = move || {
             handle2.set_result(f());
         };
 
         // maybe turn SendError into JoinError?
-        let _ = self.tx.send(Box::new(trunk));
+        let _ = self.tx.send(Box::new(thunk));
 
         // Garbage collection.
         let ended = threads.iter().any(|t| t.is_finished());

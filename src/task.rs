@@ -27,7 +27,7 @@ impl Task {
 
         // Wrap the future with a Future<Output=()> so that Task doesn't have to be generic.
         let join_handle2 = join_handle.clone();
-        let trampoline = async move {
+        let thunk = async move {
             let res = fut.await;
             join_handle2.set_result(res);
         };
@@ -36,7 +36,7 @@ impl Task {
         // Note that in the current implementation, `tx` is in blocking mode!
         let task = Task {
             id,
-            future: Box::pin(trampoline),
+            future: Box::pin(thunk),
             waker: Arc::new(TaskWaker{ id, tx }).into(),
         };
 

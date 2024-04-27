@@ -17,7 +17,9 @@ for the read/write traits, and socket2 for sockets). Can run Send and non-Send f
 There are 5 'unsafe' blocks, all in src/syscall.rs, implementing
 the poll(2), pipe(2) and write(2) system calls.
 
-## Testing (or, seeing a demo).
+## Example.
+
+There's an example in examples/naratest.rs:
 
 ```
 cargo run --example naratest
