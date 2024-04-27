@@ -21,7 +21,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("test2: timer done");
 
         println!("test3: tcp connection");
-        let mut tcp = TcpStream::connect(("smtp.xs4all.nl", 25)).await?;
+        let mut tcp = TcpStream::connect(("smtp.bit.nl", 25)).await?;
         println!("test3: connected!");
         let mut buffer: [u8; 256] = [0; 256];
         while let Ok(len) = tcp.read(&mut buffer).await {

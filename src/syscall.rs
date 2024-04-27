@@ -2,6 +2,8 @@
 use std::fs::File;
 use std::io;
 use std::os::fd::{FromRawFd, RawFd};
+use std::time::Duration;
+use libc::c_int;
 
 fn result(val: isize) -> io::Result<usize> {
     match val {
@@ -10,25 +12,24 @@ fn result(val: isize) -> io::Result<usize> {
     }
 }
 
-pub fn poll(pollfds: &mut [libc::pollfd], timeout: i32) -> io::Result<usize> {
-
-    // The types are the same, so the try_into().unwrap() should get optimized out.
-    let timeout: libc::c_int = timeout.try_into().unwrap();
-    let nfds = pollfds.len() as libc::nfds_t;
-
-    // SAFETY: very basic linux system call.
-    let res = unsafe {
-        libc::poll(pollfds.as_mut_ptr(), nfds, timeout)
-    };
-    result(res as isize)
-}
-
 fn non_blocking(fd: RawFd) {
     // SAFETY: very basic linux system calls, no pointers.
     unsafe {
         let flags = libc::fcntl(fd, libc::F_GETFL, 0);
         libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
     }
+}
+
+pub fn poll(pollfds: &mut [libc::pollfd], timeout: Option<Duration>) -> io::Result<usize> {
+
+    let t = timeout.map(|t| t.as_millis().clamp(0, c_int::MAX as u128) as c_int).unwrap_or(-1);
+    let nfds = pollfds.len() as libc::nfds_t;
+
+    // SAFETY: very basic linux system call.
+    let res = unsafe {
+        libc::poll(pollfds.as_mut_ptr(), nfds, t)
+    };
+    result(res as isize)
 }
 
 // Note that we change this pipe to non-blocking on the read side,

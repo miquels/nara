@@ -2,8 +2,8 @@
 
 A minimal, single-threaded async i/o runtime for Rust.
 
-Only has three dependencies (libc for the `poll` system call, futures-util and futures-io
-for the read/write traits). Can run Send and non-Send futures.
+Only has four dependencies (libc for the `poll` system call, futures-util and futures-io
+for the read/write traits, and socket2 for sockets). Can run Send and non-Send futures.
 
 ## Current status
 
@@ -27,4 +27,4 @@ cargo run --example naratest
 Lines of code, counted by `cloc src`
 
 Tokio: 82513  
-Nara:  785
+Nara:  923

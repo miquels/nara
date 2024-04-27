@@ -29,7 +29,7 @@ thread_local! {
 
 // Interest.
 #[repr(u16)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Interest {
     Read = libc::POLLIN as _,
     Write = libc::POLLOUT as _,
@@ -102,7 +102,6 @@ impl InnerReactor {
         const INTERESTING: u32 = (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) as u32;
 
         // Run the poll system call.
-        let timeout = timeout.map(|t| t.as_millis() as i32).unwrap_or(-1);
         let mut todo = match syscall::poll(&mut self.pollfds, timeout) {
             Ok(n) => n,
             Err(_) => return,
@@ -202,13 +201,20 @@ impl InnerReactor {
     }
 
     // Request to be woken up when event of interest happens on fd.
-    fn wake_when(&mut self, reg: &Registration, interest: Interest, waker: Waker) {
+    fn add_wake_when(&mut self, reg: &Registration, interest: Interest, waker: Waker) {
         let idx = self.fd_index(reg, true);
         // Add the waiter to the list, and update events to listen for.
         self.fd_info[idx].waiters.push(FdWaiter{ interest, reg_id: reg.id, waker });
         self.pollfds[idx].events = self.fd_info[idx].poll_bits().try_into().unwrap();
         self.pollfds[idx].revents = 0;
         self.pollfds[idx].fd = reg.fd;
+    }
+
+    // Remove waker.
+    fn remove_wake_when(&mut self, reg: &Registration, interest: Interest) {
+        let idx = self.fd_index(reg, true);
+        self.fd_info[idx].waiters.retain(|w| w.reg_id != reg.id && w.interest != interest);
+        self.pollfds[idx].events = self.fd_info[idx].poll_bits().try_into().unwrap();
     }
 
     // Check for spurious wakeup.
@@ -249,7 +255,12 @@ impl Registration {
 
     pub fn wake_when(&self, interest: Interest, waker: Waker) {
         let inner = self.reactor.upgrade().unwrap();
-        inner.borrow_mut().wake_when(self, interest, waker);
+        inner.borrow_mut().add_wake_when(self, interest, waker);
+    }
+
+    pub fn remove_wake_when(&self, interest: Interest) {
+        let inner = self.reactor.upgrade().unwrap();
+        inner.borrow_mut().remove_wake_when(self, interest);
     }
 
     pub fn was_woken(&self) -> bool {
@@ -257,10 +268,50 @@ impl Registration {
         let res = inner.borrow().was_woken(self);
         res
     }
+
+    pub async fn write_ready(&self) {
+        FdReady { reg: self, has_no_waker: true, interest: Interest::Write }.await;
+    }
 }
 
 impl Drop for Registration {
     fn drop(&mut self) {
         self.reactor.upgrade().map(|r| r.borrow_mut().deregister_fd(&self));
+    }
+}
+
+// Implement as struct, so that we can implement Drop on the struct.
+struct FdReady<'a> {
+    reg: &'a Registration,
+    has_no_waker: bool,
+    interest: Interest,
+}
+
+use std::task::{Context, Poll};
+
+impl<'a> std::future::Future for FdReady<'a> {
+    type Output = ();
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let this = self.get_mut();
+        let reactor = this.reg.reactor.upgrade().unwrap();
+        let mut reactor = reactor.borrow_mut();
+        if !reactor.was_woken(this.reg) {
+            return Poll::Pending;
+        }
+        if std::mem::take(&mut this.has_no_waker) {
+            reactor.add_wake_when(this.reg, this.interest, cx.waker().clone());
+            return Poll::Pending;
+        }
+        this.has_no_waker = true;
+        Poll::Ready(())
+    }
+}
+
+impl<'a> Drop for FdReady<'a> {
+    fn drop(&mut self) {
+        if !self.has_no_waker {
+            self.reg.remove_wake_when(self.interest);
+        }
     }
 }

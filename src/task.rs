@@ -74,6 +74,12 @@ impl Wake for TaskWaker {
 
 #[derive(Debug)]
 pub struct JoinError;
+impl std::fmt::Display for JoinError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "JoinError")
+    }
+}
+impl std::error::Error for JoinError {}
 
 // spawn() and spawn_blocking return a JoinHandle, which can be awaited on,
 // and which will return the return value of the spawned task.
