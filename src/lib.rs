@@ -14,4 +14,10 @@ pub mod sync {
     pub mod mpsc;
 }
 
+#[path="."]
+pub mod unsync {
+    #[path="mpsc_unsync.rs"]
+    pub mod mpsc;
+}
+
 pub use self::task::spawn;

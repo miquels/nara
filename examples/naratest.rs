@@ -6,27 +6,39 @@ use nara::runtime::Runtime;
 use nara::task;
 use nara::time::sleep;
 use nara::net::TcpStream;
-use nara::sync::mpsc::channel;
+use nara::unsync::mpsc::channel;
 
 async fn test_channel() {
-    let (tx, rx) = channel(10);
+    let (tx1, rx) = channel(4);
+    let tx2 = tx1.clone();
 
-    let ping = task::spawn(async move {
-        println!("test_channel: start sender");
+    let ping1 = task::spawn(async move {
+        println!("test_channel: start sender 1");
         for i in 1 ..=10 {
-            tx.send(i).await.unwrap();
+            tx1.send(i).await.unwrap();
+            sleep(Duration::from_millis(100)).await;
+        }
+    });
+
+    let ping2 = task::spawn(async move {
+        println!("test_channel: start sender 2");
+        sleep(Duration::from_millis(50)).await;
+        for i in 11 ..=20 {
+            tx2.send(i).await.unwrap();
             sleep(Duration::from_millis(100)).await;
         }
     });
 
     let pong = task::spawn(async move {
+        sleep(Duration::from_millis(500)).await;
         println!("test_channel: start receiver");
         while let Some(num) = rx.recv().await {
             println!("test_channel: recv {num}");
         }
     });
 
-    let _ = ping.await;
+    let _ = ping1.await;
+    let _ = ping2.await;
     let _ = pong.await;
     println!("test_channel: done");
 }
