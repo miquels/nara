@@ -14,6 +14,7 @@ for the read/write traits, and socket2 for sockets). Can run Send and non-Send f
 - timer: `sleep`, `sleep_until`.
 - net: `TcpStream`
 - sync: `mpsc::channel()`
+- unsync: `mpsc::channel()` (not Send + 'static but 3x faster)
 
 There are 5 'unsafe' blocks, all in src/syscall.rs, implementing
 the poll(2), pipe(2) and write(2) system calls.
@@ -30,4 +31,4 @@ cargo run --example naratest
 Lines of code, counted by `cloc src`
 
 Tokio: 82513  
-Nara:  1029
+Nara:  1147
