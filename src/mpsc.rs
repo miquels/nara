@@ -78,7 +78,7 @@ impl<T> Drop for Sender<T> {
 }
 
 impl<T> Receiver<T> {
-    pub async fn recv(&self) -> Option<T> {
+    pub async fn recv(&mut self) -> Option<T> {
         std::future::poll_fn(move |cx: &mut Context<'_>| {
             let mut set_waker = false;
             let res = loop {
