@@ -28,7 +28,7 @@ impl Runtime {
     }
 
     /// Run a future on the executor.
-    pub fn block_on<F: Future<Output=T> + 'static, T: 'static>(&self, fut: F) -> T {
+    pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
         let _guard = self.enter();
         self.executor.block_on(fut)
     }

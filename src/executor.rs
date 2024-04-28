@@ -86,11 +86,16 @@ impl Executor {
         self.inner.runq.borrow_mut().pop_back()
     }
 
-    pub fn block_on<F: Future<Output=T> + 'static, T: 'static>(&self, fut: F) -> T {
+    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
         let this = &self.inner;
 
-        // Spawn the initial task.
-        let handle = this.spawn(fut);
+        // The passed in future does not have to be Send or 'static. All current
+        // executors work like this, and the ecosystem expects it.
+        //
+        // So, we cannot just `spawn()` it. We put an empty Task on the queue that references
+        // the passed in `future` and run the future directly instead of the task.
+        let mut main_future = std::pin::pin!(future);
+        let main_task_id = this.spawn_main();
 
         // This is the entire scheduler.
         loop {
@@ -102,14 +107,18 @@ impl Executor {
                 this.current_woken.set(false);
 
                 loop {
-                    // Poll the task.
-                    if task.poll().is_ready() {
-
-                        // If this was the initial task, return right away.
-                        if task.id == handle.id {
-                            return handle.get_result().unwrap();
+                    if task.id == main_task_id {
+                        // Poll the main future.
+                        use std::task::{Context, Poll};
+                        let mut cx = Context::from_waker(&task.waker);
+                        if let Poll::Ready(output) = main_future.as_mut().poll(&mut cx) {
+                            return output;
                         }
-                        break;
+                    } else {
+                        // Poll the task.
+                        if task.poll().is_ready() {
+                            break;
+                        }
                     }
 
                     // Stop the loop, _unless_ we woke ourself.
@@ -140,12 +149,21 @@ impl Executor {
 impl InnerExecutor {
 
     // Create a new task and put it on the run queue right away.
-    pub(crate) fn spawn<F: Future<Output=T> + 'static, T: 'static>(&self, fut: F) -> JoinHandle<T> {
+    pub(crate) fn spawn<F: Future + 'static>(&self, fut: F) -> JoinHandle<F::Output> {
         let id = self.next_id.get();
         self.next_id.set(id + 1);
         let (task, handle) = Task::new(id, self.wake_pipe_tx.as_raw_fd(), fut);
         self.runq.borrow_mut().push_back(task);
         handle
+    }
+
+    // Create the main task reference and put it on the run queue right away.
+    pub(crate) fn spawn_main(&self) -> u64 {
+        let id = self.next_id.get();
+        self.next_id.set(id + 1);
+        let task = Task::main_task(id, self.wake_pipe_tx.as_raw_fd());
+        self.runq.borrow_mut().push_back(task);
+        id
     }
 
     // Queue a task onto the run queue.

@@ -43,6 +43,12 @@ impl Task {
         (task, join_handle)
     }
 
+    // Used for the main task in `block_on()`.
+    pub fn main_task(id: u64, tx: RawFd) -> Self {
+        let waker = Arc::new(TaskWaker { id, tx }).into();
+        Task { id, future: Box::pin(async {}), waker }
+    }
+
     // Poll the Task.
     pub fn poll(&mut self) -> Poll<()> {
         let mut cx = Context::from_waker(&self.waker);
@@ -112,10 +118,6 @@ impl<T> JoinHandle<T> {
         if let Some(waker) = inner.waker.take() {
             waker.wake();
         }
-    }
-
-    pub(crate) fn get_result(&self) -> Option<T> {
-        self.inner.lock().unwrap().result.take()
     }
 }
 
