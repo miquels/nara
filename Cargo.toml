@@ -3,6 +3,9 @@ name = "nara"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "nara"
+
 [dependencies]
 # For system calls.
 libc = "0.2.153"
@@ -15,9 +18,16 @@ socket2 = "0.5.6"
 
 [dev-dependencies]
 futures = "0.3.30"
-
-[lib]
-name = "nara"
+criterion = { version = "0.5.1", features = [ "async" ] }
+tokio = { version = "1.37.0", features = [ "rt", "sync" ] }
 
 [[example]]
 name = "naratest"
+
+[[bench]]
+name = "channel_tokio"
+harness = false
+
+[[bench]]
+name = "channel_nara"
+harness = false
