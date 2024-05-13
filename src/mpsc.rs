@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{TryRecvError, TrySendError};
 use std::task::{Context, Poll, Waker};
@@ -10,21 +11,6 @@ pub struct Sender<T> {
     sender: std::sync::mpsc::SyncSender<T>,
     tx_waker: Arc<Mutex<Option<Waker>>>,
     rx_waker: Arc<Mutex<Option<Waker>>>,
-}
-
-pub struct Receiver<T> {
-    receiver: std::sync::mpsc::Receiver<T>,
-    tx_waker: Arc<Mutex<Option<Waker>>>,
-    rx_waker: Arc<Mutex<Option<Waker>>>,
-}
-
-pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
-    let (sender, receiver) = std::sync::mpsc::sync_channel::<T>(capacity);
-    let tx_waker = Arc::new(Mutex::new(None));
-    let rx_waker = Arc::new(Mutex::new(None));
-    let tx = Sender { sender, tx_waker: tx_waker.clone(), rx_waker: rx_waker.clone() };
-    let rx = Receiver { receiver, tx_waker, rx_waker };
-    (tx, rx)
 }
 
 impl<T> Sender<T> {
@@ -77,20 +63,45 @@ impl<T> Drop for Sender<T> {
     }
 }
 
+pub struct Receiver<T> {
+    receiver: std::sync::mpsc::Receiver<T>,
+    tx_waker: Arc<Mutex<Option<Waker>>>,
+    rx_waker: Arc<Mutex<Option<Waker>>>,
+    buffer: VecDeque<Result<T, TryRecvError>>,
+    bounded: bool,
+}
+
 impl<T> Receiver<T> {
     pub async fn recv(&mut self) -> Option<T> {
         std::future::poll_fn(move |cx: &mut Context<'_>| {
             let mut set_waker = false;
             let res = loop {
 
-                // Try to receive.
-                match self.receiver.try_recv() {
-                    Ok(val) => {
-                        self.tx_waker.lock().unwrap().take().map(|w| w.wake());
-                        break Some(val);
-                    },
-                    Err(TryRecvError::Disconnected) => break None,
-                    Err(TryRecvError::Empty) => {},
+                if !self.bounded {
+                    // If internal buffer is empty, fill it.
+                    if self.buffer.len() == 0 {
+                        let mut err = false;
+                        while !err {
+                            let res = self.receiver.try_recv();
+                            err = res.is_err();
+                            self.buffer.push_back(res);
+                        }
+                    }
+                    // Read next value from internal buffer.
+                    match self.buffer.pop_front().unwrap() {
+                        Ok(val) => break Some(val),
+                        Err(TryRecvError::Disconnected) => break None,
+                        Err(TryRecvError::Empty) => {},
+                    }
+                } else {
+                    match self.receiver.try_recv() {
+                        Ok(val) => {
+                            self.tx_waker.lock().unwrap().take().map(|w| w.wake());
+                            break Some(val);
+                        },
+                        Err(TryRecvError::Disconnected) => break None,
+                        Err(TryRecvError::Empty) => {},
+                    }
                 };
 
                 // Second time through the loop?
@@ -123,4 +134,50 @@ impl<T> Drop for Receiver<T> {
     fn drop(&mut self) {
         self.tx_waker.lock().unwrap().take().map(|w| w.wake());
     }
+}
+
+#[derive(Clone)]
+pub struct UnboundedSender<T> {
+    sender: std::sync::mpsc::Sender<T>,
+    rx_waker: Arc<Mutex<Option<Waker>>>,
+}
+pub type UnboundedReceiver<T> = Receiver<T>;
+
+impl<T> UnboundedSender<T> {
+    pub fn send(&self, value: T) -> Result<(), SendError<T>> {
+        self.sender.send(value)?;
+        self.rx_waker.lock().unwrap().take().map(|w| w.wake());
+        Ok(())
+    }
+}
+
+impl<T> Drop for UnboundedSender<T> {
+    fn drop(&mut self) {
+        let mut rx_waker = self.rx_waker.lock().unwrap();
+        if Arc::strong_count(&self.rx_waker) == 2 {
+            rx_waker.take().map(|w| w.wake());
+        }
+    }
+}
+
+/// Create a bounded channel.
+pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<T>(capacity);
+    let buffer = VecDeque::new();
+    let tx_waker = Arc::new(Mutex::new(None));
+    let rx_waker = Arc::new(Mutex::new(None));
+    let tx = Sender { sender, tx_waker: tx_waker.clone(), rx_waker: rx_waker.clone() };
+    let rx = Receiver { receiver, tx_waker, rx_waker, buffer, bounded: true };
+    (tx, rx)
+}
+
+/// Create an unbounded channel.
+pub fn unbounded_channel<T>() -> (UnboundedSender<T>, Receiver<T>) {
+    let (sender, receiver) = std::sync::mpsc::channel::<T>();
+    let buffer = VecDeque::new();
+    let tx_waker = Arc::new(Mutex::new(None));
+    let rx_waker = Arc::new(Mutex::new(None));
+    let tx = UnboundedSender { sender, rx_waker: rx_waker.clone() };
+    let rx = UnboundedReceiver { receiver, tx_waker, rx_waker, buffer, bounded: false };
+    (tx, rx)
 }

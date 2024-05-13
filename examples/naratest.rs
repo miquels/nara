@@ -9,7 +9,7 @@ use nara::net::TcpStream;
 use nara::unsync::mpsc::channel;
 
 async fn test_channel() {
-    let (tx1, rx) = channel(4);
+    let (tx1, mut rx) = channel(4);
     let tx2 = tx1.clone();
 
     let ping1 = task::spawn(async move {
