@@ -1,6 +1,8 @@
 // re-exports.
-pub use futures_io::{AsyncRead, AsyncWrite};
-pub use futures_util::{AsyncReadExt, AsyncWriteExt};
+pub use std::io::{Error, ErrorKind, Result};
+pub use futures_io::{AsyncBufRead, AsyncRead, AsyncSeek, AsyncWrite};
+pub use futures_util::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+pub use futures_util::io::{BufReader, BufWriter};
 
 //
 // Inner implementation details.
